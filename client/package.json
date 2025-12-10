@@ -1,0 +1,114 @@
+const API_BASE = `${location.origin}/api`; // if server and client are same host. If separate, replace with backend URL
+
+const API = (path) => `${API_BASE}${path}`;
+
+// Upload CSV
+document.getElementById("uploadBtn").addEventListener("click", async () => {
+  const f = document.getElementById("csvFile").files[0];
+  if (!f) return alert("Choose CSV");
+  const fd = new FormData();
+  fd.append("file", f);
+  const res = await fetch(API("/students/import"), {
+    method: "POST",
+    body: fd,
+  });
+  const j = await res.json();
+  document.getElementById("uploadMsg").innerText = JSON.stringify(j);
+  loadHalls();
+});
+
+// Add hall
+document.getElementById("addHallBtn").addEventListener("click", async () => {
+  const name = document.getElementById("hallName").value;
+  const rows = Number(document.getElementById("rows").value);
+  const cols = Number(document.getElementById("cols").value);
+  const acc = document
+    .getElementById("accessible")
+    .value.split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!name || !rows || !cols) return alert("fill name, rows, cols");
+  await fetch(API("/halls"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      rows,
+      cols,
+      capacity: rows * cols,
+      accessibleSeats: acc,
+    }),
+  });
+  document.getElementById("hallName").value = "";
+  document.getElementById("rows").value = "";
+  document.getElementById("cols").value = "";
+  document.getElementById("accessible").value = "";
+  loadHalls();
+});
+
+async function loadHalls() {
+  const res = await fetch(API("/halls"));
+  const halls = await res.json();
+  const hs = document.getElementById("hallsList");
+  hs.innerHTML = "";
+  const sel = document.getElementById("hallSelect");
+  sel.innerHTML = "";
+  halls.forEach((h) => {
+    hs.innerHTML += `<div>${h.name} (${h.rows}x${h.cols})</div>`;
+    sel.innerHTML += `<option value="${h._id}">${h.name}</option>`;
+  });
+}
+
+loadHalls();
+
+// Run allocation
+document.getElementById("runAllocBtn").addEventListener("click", async () => {
+  const selected = Array.from(
+    document.getElementById("hallSelect").selectedOptions
+  ).map((o) => o.value);
+  const exam = document.getElementById("examLabel").value || "Exam";
+  if (!selected.length) return alert("Select at least 1 hall");
+  const res = await fetch(API("/allocate/run"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      exam,
+      hallIds: selected,
+      options: { avoidSameProgramAdj: true },
+    }),
+  });
+  const j = await res.json();
+  document.getElementById("allocResult").innerText = JSON.stringify(j, null, 2);
+  const firstHallId = Object.keys(j.allocations || {})[0];
+  if (firstHallId) renderPreview(j.allocations[firstHallId]);
+});
+
+function renderPreview(assignments) {
+  const preview = document.getElementById("preview");
+  let maxR = 0,
+    maxC = 0;
+  const map = {};
+  assignments.forEach((a) => {
+    const m = a.seat.match(/R(\d+)C(\d+)/i);
+    if (!m) return;
+    const r = Number(m[1]),
+      c = Number(m[2]);
+    maxR = Math.max(maxR, r);
+    maxC = Math.max(maxC, c);
+    map[`${r},${c}`] = a.student.name + " (" + a.student.regNo + ")";
+  });
+  const grid = document.createElement("div");
+  grid.className = "grid";
+  grid.style.gridTemplateColumns = `repeat(${maxC}, 1fr)`;
+  for (let r = 1; r <= maxR; r++) {
+    for (let c = 1; c <= maxC; c++) {
+      const div = document.createElement("div");
+      div.className = "cell";
+      const text = map[`${r},${c}`] || "-";
+      div.innerHTML = `<div class="seat">R${r}C${c}</div><div class="name">${text}</div>`;
+      grid.appendChild(div);
+    }
+  }
+  preview.innerHTML = "";
+  preview.appendChild(grid);
+}
